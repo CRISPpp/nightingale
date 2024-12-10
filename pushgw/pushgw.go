@@ -3,6 +3,7 @@ package pushgw
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/ccfos/nightingale/v6/center/metas"
 	"github.com/ccfos/nightingale/v6/conf"
@@ -19,6 +20,20 @@ import (
 type PushgwProvider struct {
 	Ident  *idents.Set
 	Router *router.Router
+}
+
+func metricCountTick () {
+	ticker := time.Tick(200 * time.Millisecond)
+
+	for range ticker {
+		timestamp := time.Now().Unix()
+		if timestamp - writer.MC.LastTimeStamp > 30 {
+			writer.MC.Mutex.Lock()
+			writer.MC.Count = 0
+			writer.MC.LastTimeStamp = timestamp
+			writer.MC.Mutex.Unlock()
+		}
+	}
 }
 
 func Initialize(configDir string, cryptoKey string) (func(), error) {
@@ -57,6 +72,10 @@ func Initialize(configDir string, cryptoKey string) (func(), error) {
 	rt.Config(r)
 
 	httpClean := httpx.Init(config.HTTP, r)
+
+	writer.MC.MaxCountPerMinute = config.Pushgw.MaxCountPerMinute
+	writer.MC.LastTimeStamp = time.Now().Unix()
+	go metricCountTick()
 
 	return func() {
 		logxClean()

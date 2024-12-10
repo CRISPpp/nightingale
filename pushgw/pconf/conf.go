@@ -21,6 +21,7 @@ type Pushgw struct {
 	DropSample          []map[string]string
 	WriterOpt           WriterGlobalOpt
 	Writers             []WriterOptions
+	MaxCountPerMinute int
 }
 
 type WriterGlobalOpt struct {

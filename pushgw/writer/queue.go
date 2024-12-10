@@ -3,8 +3,10 @@ package writer
 import (
 	"container/list"
 	"sync"
+	"time"
 
 	"github.com/prometheus/prometheus/prompb"
+	"github.com/toolkits/pkg/logger"
 )
 
 type SafeList struct {
@@ -12,11 +14,25 @@ type SafeList struct {
 	L *list.List
 }
 
+type MetricCount struct {
+	MaxCountPerMinute int
+	Count int
+	LastTimeStamp int64
+	Mutex sync.Mutex
+}
+
+var MC *MetricCount = &MetricCount{
+	MaxCountPerMinute: 10000,
+	Count: 0,
+	LastTimeStamp: time.Now().Unix(),
+}
+
 func NewSafeList() *SafeList {
 	return &SafeList{L: list.New()}
 }
 
 func (sl *SafeList) PushFront(v interface{}) *list.Element {
+
 	sl.Lock()
 	e := sl.L.PushFront(v)
 	sl.Unlock()
@@ -85,20 +101,47 @@ func (sll *SafeListLimited) PopBack(max int) []prompb.TimeSeries {
 }
 
 func (sll *SafeListLimited) PushFront(v interface{}) bool {
+	MC.Mutex.Lock()
+	defer MC.Mutex.Unlock()
+
+	if MC.Count > MC.MaxCountPerMinute {
+		logger.Warningf("metric count exceed %d, cur count: %d metrics", MC.MaxCountPerMinute, MC.Count)
+		return false
+	}
+
 	if sll.SL.Len() >= sll.maxSize {
 		return false
 	}
 
 	sll.SL.PushFront(v)
+	MC.Count += 1
+	
 	return true
 }
 
 func (sll *SafeListLimited) PushFrontBatch(vs []interface{}) bool {
+	MC.Mutex.Lock()
+	defer MC.Mutex.Unlock()
+
+	if MC.Count > MC.MaxCountPerMinute {
+		logger.Warningf("metric count exceed %d, cur count: %d metrics", MC.MaxCountPerMinute, MC.Count)
+		return false
+	}
+
 	if sll.SL.Len() >= sll.maxSize {
 		return false
 	}
 
+	if MC.Count + len(vs) > MC.MaxCountPerMinute {
+		overCnt := MC.Count + len(vs) - MC.MaxCountPerMinute
+		logger.Warningf("metric count exceed %d, over count: %d metrics", MC.MaxCountPerMinute, overCnt)
+		sll.SL.PushFrontBatch(vs[:len(vs)-overCnt])
+		MC.Count += len(vs) - overCnt
+		return true
+	}
+
 	sll.SL.PushFrontBatch(vs)
+	MC.Count += len(vs)
 	return true
 }
 
